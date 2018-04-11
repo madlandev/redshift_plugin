@@ -181,7 +181,7 @@ class S3ToRedshiftOperator(BaseOperator):
         if self.origin_datatype:		
             if self.origin_datatype.lower() == 'mysql':		
                 for i in schema:		
-                    schema[i] = self.mysql_to_redshift_type_convert(schema[i])
+                    i['type'] = self.mysql_to_redshift_type_convert(i['type'])
         return schema
 
     def reconcile_schemas(self, schema, pg_hook):
