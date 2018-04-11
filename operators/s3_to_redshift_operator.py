@@ -2,6 +2,7 @@ import json
 import random
 import string
 import logging
+import re
 
 from airflow.utils.db import provide_session
 from airflow.models import Connection
@@ -42,6 +43,11 @@ class S3ToRedshiftOperator(BaseOperator):
                                     is defined in the operator itself. By
                                     default the location is set to 's3'.
     :type schema_location:          string
+    :param origin_datatype:         The incoming database type from which to		
+                                    convert the origin schema. Required when		
+                                    specifiying the origin_schema. Current		
+                                    possible values include "mysql".		
+    :type origin_datatype:          string
     :param load_type:               The method of loading into Redshift that
                                     should occur. Options:
                                         - "append"
@@ -99,6 +105,7 @@ class S3ToRedshiftOperator(BaseOperator):
                  copy_params=[],
                  origin_schema=None,
                  schema_location='s3',
+                 origin_datatype=None,
                  load_type='append',
                  primary_key=None,
                  incremental_key=None,
@@ -118,6 +125,7 @@ class S3ToRedshiftOperator(BaseOperator):
         self.copy_params = copy_params
         self.origin_schema = origin_schema
         self.schema_location = schema_location
+        self.origin_datatype = origin_datatype
         self.load_type = load_type
         self.primary_key = primary_key
         self.incremental_key = incremental_key
@@ -170,7 +178,10 @@ class S3ToRedshiftOperator(BaseOperator):
                 schema = json.loads(schema.replace("'", '"'))
         else:
             schema = self.origin_schema
-
+        if self.origin_datatype:		
+            if self.origin_datatype.lower() == 'mysql':		
+                for i in schema:		
+                    schema[i] = self.mysql_to_redshift_type_convert(schema[i])
         return schema
 
     def reconcile_schemas(self, schema, pg_hook):
@@ -402,3 +413,98 @@ class S3ToRedshiftOperator(BaseOperator):
                        sortkey=sk)
 
         pg_hook.run([create_schema_query, create_table_query])
+
+    def mysql_to_redshift_type_convert(self, mysql_type):
+        mysql_type = mysql_type.lower()
+        try:
+            sql_type, extra = mysql_type.strip().split(" ", 1)
+
+            # This must be a tricky enum
+            if ')' in extra:
+                sql_type, extra = mysql_type.strip().split(")")
+
+        except ValueError:
+            sql_type = mysql_type.strip()
+            extra = ""
+
+        # check if extra contains unsigned
+        unsigned = "unsigned" in extra
+        # remove unsigned now
+        extra = re.sub("character set [\w\d]+\s*", "", extra.replace("unsigned", ""))
+        extra = re.sub("collate [\w\d]+\s*", "", extra.replace("unsigned", ""))
+        extra = extra.replace("auto_increment", "")
+        extra = extra.replace("serial", "")
+        extra = extra.replace("zerofill", "")
+        extra = extra.replace("unsigned", "")
+
+        if sql_type == "tinyint(1)":
+            red_type = "boolean"
+        elif sql_type.startswith("tinyint("):
+            red_type = "smallint"
+        elif sql_type.startswith("smallint("):
+            if unsigned:
+                red_type = "integer"
+            else:
+                red_type = "smallint"
+        elif sql_type.startswith("mediumint("):
+            red_type = "integer"
+        elif sql_type.startswith("int("):
+            if unsigned:
+                red_type = "bigint"
+            else:
+                red_type = "integer"
+        elif sql_type.startswith("bigint("):
+            if unsigned:
+                red_type = "varchar(80)"
+            else:
+                red_type = "bigint"
+        elif sql_type.startswith("float"):
+            red_type = "real"
+        elif sql_type.startswith("double"):
+            red_type = "double precision"
+        elif sql_type.startswith("decimal"):
+            # same decimal
+            red_type = sql_type
+        elif sql_type.startswith("char("):
+            size = int(sql_type.split("(")[1].rstrip(")"))
+            red_type = "varchar(%s)" % (size * 4)
+        elif sql_type.startswith("varchar("):
+            size = int(sql_type.split("(")[1].rstrip(")"))
+            red_type = "varchar(%s)" % (size * 4)
+        elif sql_type == "longtext":
+            red_type = "varchar(max)"
+        elif sql_type == "mediumtext":
+            red_type = "varchar(max)"
+        elif sql_type == "tinytext":
+            red_type = "text(%s)" % (255 * 4)
+        elif sql_type == "text":
+            red_type = "varchar(max)"
+        elif sql_type.startswith("enum(") or sql_type.startswith("set("):
+            red_type = "varchar(%s)" % (255 * 2)
+        elif sql_type == "blob":
+            red_type = "varchar(max)"
+        elif sql_type == "mediumblob":
+            red_type = "varchar(max)"
+        elif sql_type == "longblob":
+            red_type = "varchar(max)"
+        elif sql_type == "tinyblob":
+            red_type = "varchar(255)"
+        elif sql_type.startswith("binary"):
+            red_type = "varchar(255)"
+        elif sql_type == "date":
+            # same
+            red_type = sql_type
+        elif sql_type == "time":
+            red_type = "varchar(40)"
+        elif sql_type == "datetime":
+            red_type = "timestamp"
+        elif sql_type == "year":
+            red_type = "varchar(16)"
+        elif sql_type == "timestamp":
+            # same
+            red_type = sql_type
+        else:
+            # all else, e.g., varchar binary
+            red_type = "varchar(max)"
+
+        return('{type} {extra_def}'.format(type=red_type, extra_def=extra))
