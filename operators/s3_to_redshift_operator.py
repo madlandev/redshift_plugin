@@ -182,6 +182,11 @@ class S3ToRedshiftOperator(BaseOperator):
             if self.origin_datatype.lower() == 'mysql':		
                 for i in schema:		
                     i['type'] = self.mysql_to_redshift_type_convert(i['type'])
+            elif self.origin_datatype.lower() == 'postgres':		
+                for i in schema:		
+                    i['type'] = self.postgres_to_redshift_type_convert(i['type'])
+            elif self.origin_datatype is not None:
+                raise Exception('Unsupported origin data type')
         return schema
 
     def reconcile_schemas(self, schema, pg_hook):
@@ -508,3 +513,16 @@ class S3ToRedshiftOperator(BaseOperator):
             red_type = "varchar(max)"
 
         return('{type} {extra_def}'.format(type=red_type, extra_def=extra))
+
+    def postgres_to_redshift_type_convert(self, postgres_type):
+        postgres_type = postgres_type.lower()
+        
+        if postgres_type == "jsonb":
+            red_type = "varchar(max)"
+        elif postgres_type == "text":
+            red_type = "varchar(max)"
+        else:
+            # all else, e.g., varchar binary
+            red_type = postgres_type
+
+        return('{type}'.format(type=red_type))
