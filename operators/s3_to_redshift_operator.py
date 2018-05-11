@@ -171,10 +171,9 @@ class S3ToRedshiftOperator(BaseOperator):
     def read_and_format(self):
         if self.schema_location.lower() == 's3':
                 hook = S3Hook(self.s3_conn_id)
-                schema = (hook.get_key(self.origin_schema,
+                schema = (hook.read_key(self.origin_schema,
                                        bucket_name=
-                                       '{0}'.format(self.s3_bucket))
-                          .get_contents_as_string(encoding='utf-8'))
+                                       '{0}'.format(self.s3_bucket)))
                 schema = json.loads(schema.replace("'", '"'))
         else:
             schema = self.origin_schema
