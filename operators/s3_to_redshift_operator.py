@@ -159,13 +159,15 @@ class S3ToRedshiftOperator(BaseOperator):
         random_string = ''.join(random.choice(letters) for _ in range(7))
         self.temp_suffix = '_tmp_{0}'.format(random_string)
 
-        if self.origin_schema:
-            schema = self.read_and_format()
-
         pg_hook = PostgresHook(self.redshift_conn_id)
 
-        self.create_if_not_exists(schema, pg_hook)
-        self.reconcile_schemas(schema, pg_hook)
+        schema = None
+        
+        if self.origin_schema:
+            schema = self.read_and_format()
+            self.create_if_not_exists(schema, pg_hook)
+            self.reconcile_schemas(schema, pg_hook)
+        
         self.copy_data(pg_hook, schema)
 
     def read_and_format(self):
