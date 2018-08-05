@@ -54,6 +54,7 @@ class S3ToRedshiftOperator(BaseOperator):
                                         - "rebuild"
                                         - "truncate"
                                         - "upsert"
+                                        - "replace_date_partition"
                                     Defaults to "append."
     :type load_type:                string
     :param primary_key:             *(optional)* The primary key for the
@@ -66,6 +67,10 @@ class S3ToRedshiftOperator(BaseOperator):
                                     with. Only required if using a load_type of
                                     "upsert".
     :type incremental_key:          string
+    :param partition_date:          *(optional)* The partition date to delete.
+                                    Only required if using a load_type of
+                                    "replace_date_partition".
+    :type partition_date:           string
     :param foreign_key:             *(optional)* This specifies any foreign_keys
                                     in the table and which corresponding table
                                     and key they reference. This may be either
@@ -92,7 +97,8 @@ class S3ToRedshiftOperator(BaseOperator):
     """
 
     template_fields = ('s3_key',
-                       'origin_schema')
+                       'origin_schema',
+                       'partition_value')
 
     @apply_defaults
     def __init__(self,
@@ -109,6 +115,8 @@ class S3ToRedshiftOperator(BaseOperator):
                  load_type='append',
                  primary_key=None,
                  incremental_key=None,
+                 partition_key=None,
+                 partition_value=None,
                  foreign_key={},
                  distkey=None,
                  sortkey='',
@@ -129,13 +137,15 @@ class S3ToRedshiftOperator(BaseOperator):
         self.load_type = load_type
         self.primary_key = primary_key
         self.incremental_key = incremental_key
+        self.partition_key = partition_key
+        self.partition_value = partition_value
         self.foreign_key = foreign_key
         self.distkey = distkey
         self.sortkey = sortkey
         self.sort_type = sort_type
 
-        if self.load_type.lower() not in ("append", "rebuild", "truncate", "upsert"):
-            raise Exception('Please choose "append", "rebuild", or "upsert".')
+        if self.load_type.lower() not in ("append", "rebuild", "truncate", "upsert", "replace_date_partition"):
+            raise Exception('Please choose "append", "rebuild", "truncate", "upsert" or "replace_date_partition".')
 
         if self.schema_location.lower() not in ('s3', 'local'):
             raise Exception('Valid Schema Locations are "s3" or "local".')
@@ -312,6 +322,14 @@ class S3ToRedshiftOperator(BaseOperator):
             TRUNCATE TABLE "{0}"."{1}"
             '''.format(self.redshift_schema, self.table)
 
+        delete_partition_sql = \
+            '''
+            DELETE FROM "{rs_schema}"."{rs_table}"
+            WHERE "{rs_schema}"."{rs_table}"."{rs_pk}" = %(date)s
+            '''.format(rs_schema=self.redshift_schema,
+                       rs_table=self.table,
+                       rs_pk=self.partition_key)
+
         params = '\n'.join(self.copy_params)
 
         # Example params for loading json from US-East-1 S3 region
@@ -356,6 +374,9 @@ class S3ToRedshiftOperator(BaseOperator):
             pg_hook.run(delete_confirm_sql)
             pg_hook.run(append_sql, autocommit=True)
             pg_hook.run(drop_temp_sql)
+        elif self.load_type == 'replace_date_partition':
+            pg_hook.run(delete_partition_sql, parameters={"date":self.partition_value})
+            pg_hook.run(load_sql)
 
     def create_if_not_exists(self, schema, pg_hook, temp=False):
         output = ''
