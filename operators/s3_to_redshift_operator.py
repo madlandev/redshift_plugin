@@ -67,10 +67,15 @@ class S3ToRedshiftOperator(BaseOperator):
                                     with. Only required if using a load_type of
                                     "upsert".
     :type incremental_key:          string
-    :param partition_date:          *(optional)* The partition date to delete.
+    :param partition_key:           *(optional)* The key that specifies the column
+                                    used to partition the data by date.
                                     Only required if using a load_type of
                                     "replace_date_partition".
-    :type partition_date:           string
+    :type partition_key:            string
+    :param partition_value:         *(optional)* The partition date to delete.
+                                    Only required if using a load_type of
+                                    "replace_date_partition".
+    :type partition_value:          date
     :param foreign_key:             *(optional)* This specifies any foreign_keys
                                     in the table and which corresponding table
                                     and key they reference. This may be either
