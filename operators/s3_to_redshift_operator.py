@@ -191,9 +191,9 @@ class S3ToRedshiftOperator(BaseOperator):
                 schema = (hook.read_key(self.origin_schema,
                                        bucket_name=
                                        '{0}'.format(self.s3_bucket)))
-                schema = json.loads(schema.replace("'", '"'))
+                schema = json.loads(schema.replace("'", '"').lower())
         else:
-            schema = self.origin_schema
+            schema = self.origin_schema.lower()
         if self.origin_datatype:		
             if self.origin_datatype.lower() == 'mysql':		
                 for i in schema:		
@@ -201,6 +201,9 @@ class S3ToRedshiftOperator(BaseOperator):
             elif self.origin_datatype.lower() == 'postgres':		
                 for i in schema:		
                     i['type'] = self.postgres_to_redshift_type_convert(i['type'])
+            elif self.origin_datatype.lower() == 'mssql':		
+                for i in schema:		
+                    i['type'] = self.mssql_to_redshift_type_convert(i['type'])
             elif self.origin_datatype is not None:
                 raise Exception('Unsupported origin data type')
         return schema
@@ -553,3 +556,51 @@ class S3ToRedshiftOperator(BaseOperator):
             red_type = postgres_type
 
         return('{type}'.format(type=red_type))
+
+    def mssql_to_redshift_type_convert(self, mssql_type):
+        mssql_type = mssql_type.lower()
+        sql_type = mssql_type.split("(")[0]
+        
+        no_change_types = [
+            'bigint', 
+            'char',
+            'date',
+            'decimal',
+            'double precision',
+            'int',
+            'integer',
+            'numeric',
+            'real',
+            'smallint',
+            'varchar',
+            'nvarchar',
+            'nchar'
+        ]
+
+        if sql_type in no_change_types:
+            red_type = mssql_type
+        elif sql_type == 'bit':
+            red_type = 'boolean'
+        elif sql_type in ['datetime','datetime2','smalldatetime']:
+            red_type = 'timestamp'
+        elif sql_type == 'datetimeoffset':
+            red_type = 'timestamptz'
+        elif sql_type == 'float':
+            red_type = sql_type
+        elif sql_type == 'money':
+            red_type = 'decimal(15,4)'
+        elif sql_type == 'smallmoney':
+            red_type = 'decimal(6,4)'
+        elif sql_type == 'tinyint':
+            red_type = 'smallint'
+        elif sql_type == 'uniqueidentifier':
+            red_type = 'char(16)'
+        elif sql_type == 'text':
+            red_type = 'varchar(max)'
+        elif sql_type == 'xml':
+            red_type = 'varchar(max)'
+        else:
+            # unsupported conversion
+            raise ValueError(f"MS SQL Data type {mssql_type} can't be converted to Redshift Data type.")
+
+        return(red_type)
