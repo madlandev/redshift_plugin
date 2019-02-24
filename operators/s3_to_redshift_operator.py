@@ -551,6 +551,8 @@ class S3ToRedshiftOperator(BaseOperator):
             red_type = "varchar(max)"
         elif postgres_type == "text":
             red_type = "varchar(max)"
+        elif postgres_type == "geometry":
+            red_type = "varchar(max)"
         else:
             # all else, e.g., varchar binary
             red_type = postgres_type
