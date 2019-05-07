@@ -1,11 +1,11 @@
 from airflow.plugins_manager import AirflowPlugin
-from redshift_plugin.operators.s3_to_redshift_operator import S3ToRedshiftOperator
+from redshift_plugin.operators.s3_to_redshift_operator import S3ToRedshiftOperator, S3ToRedshiftSpectrumOperator
 from redshift_plugin.macros.redshift_auth import redshift_auth
 
 
 class S3ToRedshiftPlugin(AirflowPlugin):
     name = "S3ToRedshiftPlugin"
-    operators = [S3ToRedshiftOperator]
+    operators = [S3ToRedshiftOperator, S3ToRedshiftSpectrumOperator]
     # Leave in for explicitness
     hooks = []
     executors = []
