@@ -13,6 +13,181 @@ from airflow.hooks.S3_hook import S3Hook
 from airflow.hooks.postgres_hook import PostgresHook
 
 
+def mysql_to_redshift_type_convert(mysql_type):
+        mysql_type = mysql_type.lower()
+        try:
+            sql_type, extra = mysql_type.strip().split(" ", 1)
+
+            # This must be a tricky enum
+            if ')' in extra:
+                sql_type, extra = mysql_type.strip().split(")")
+
+        except ValueError:
+            sql_type = mysql_type.strip()
+            extra = ""
+
+        # check if extra contains unsigned
+        unsigned = "unsigned" in extra
+        # remove unsigned now
+        extra = re.sub("character set [\w\d]+\s*", "", extra.replace("unsigned", ""))
+        extra = re.sub("collate [\w\d]+\s*", "", extra.replace("unsigned", ""))
+        extra = extra.replace("auto_increment", "")
+        extra = extra.replace("serial", "")
+        extra = extra.replace("zerofill", "")
+        extra = extra.replace("unsigned", "")
+
+        if sql_type == "tinyint(1)":
+            red_type = "boolean"
+        elif sql_type.startswith("tinyint("):
+            red_type = "smallint"
+        elif sql_type.startswith("smallint("):
+            if unsigned:
+                red_type = "integer"
+            else:
+                red_type = "smallint"
+        elif sql_type.startswith("mediumint("):
+            red_type = "integer"
+        elif sql_type.startswith("int("):
+            if unsigned:
+                red_type = "bigint"
+            else:
+                red_type = "integer"
+        elif sql_type.startswith("bigint("):
+            if unsigned:
+                red_type = "varchar(80)"
+            else:
+                red_type = "bigint"
+        elif sql_type.startswith("float"):
+            red_type = "real"
+        elif sql_type.startswith("double"):
+            red_type = "double precision"
+        elif sql_type.startswith("decimal"):
+            # same decimal
+            red_type = sql_type
+        elif sql_type.startswith("char("):
+            size = int(sql_type.split("(")[1].rstrip(")"))
+            red_type = "varchar(%s)" % (size * 4)
+        elif sql_type.startswith("varchar("):
+            size = int(sql_type.split("(")[1].rstrip(")"))
+            red_type = "varchar(%s)" % (size * 4)
+        elif sql_type == "longtext":
+            red_type = "varchar(max)"
+        elif sql_type == "mediumtext":
+            red_type = "varchar(max)"
+        elif sql_type == "tinytext":
+            red_type = "text(%s)" % (255 * 4)
+        elif sql_type == "text":
+            red_type = "varchar(max)"
+        elif sql_type.startswith("enum(") or sql_type.startswith("set("):
+            red_type = "varchar(%s)" % (255 * 2)
+        elif sql_type == "blob":
+            red_type = "varchar(max)"
+        elif sql_type == "mediumblob":
+            red_type = "varchar(max)"
+        elif sql_type == "longblob":
+            red_type = "varchar(max)"
+        elif sql_type == "tinyblob":
+            red_type = "varchar(255)"
+        elif sql_type.startswith("binary"):
+            red_type = "varchar(255)"
+        elif sql_type == "date":
+            # same
+            red_type = sql_type
+        elif sql_type == "time":
+            red_type = "varchar(40)"
+        elif sql_type == "datetime":
+            red_type = "timestamp"
+        elif sql_type == "year":
+            red_type = "varchar(16)"
+        elif sql_type == "timestamp":
+            # same
+            red_type = sql_type
+        else:
+            # all else, e.g., varchar binary
+            red_type = "varchar(max)"
+
+        return('{type} {extra_def}'.format(type=red_type, extra_def=extra))
+
+
+def postgres_to_redshift_type_convert(postgres_type):
+    postgres_type = postgres_type.lower()
+
+    if postgres_type == "jsonb":
+        red_type = "varchar(max)"
+    elif postgres_type == "text":
+        red_type = "varchar(max)"
+    elif postgres_type == "geometry":
+        red_type = "varchar(max)"
+    else:
+        # all else, e.g., varchar binary
+        red_type = postgres_type
+
+    return('{type}'.format(type=red_type))
+
+
+def mssql_to_redshift_type_convert(mssql_type):
+    mssql_type = mssql_type.lower()
+    sql_type = mssql_type.split("(")[0]
+
+    no_change_types = [
+        'bigint',
+        'char',
+        'date',
+        'decimal',
+        'double precision',
+        'int',
+        'integer',
+        'numeric',
+        'real',
+        'smallint',
+        'varchar',
+        'nvarchar',
+        'nchar'
+    ]
+
+    if sql_type in no_change_types:
+        red_type = mssql_type
+    elif sql_type == 'bit':
+        red_type = 'boolean'
+    elif sql_type in ['datetime', 'datetime2', 'smalldatetime']:
+        red_type = 'timestamp'
+    elif sql_type == 'datetimeoffset':
+        red_type = 'timestamptz'
+    elif sql_type == 'float':
+        red_type = sql_type
+    elif sql_type == 'money':
+        red_type = 'decimal(15,4)'
+    elif sql_type == 'smallmoney':
+        red_type = 'decimal(6,4)'
+    elif sql_type == 'tinyint':
+        red_type = 'smallint'
+    elif sql_type == 'uniqueidentifier':
+        red_type = 'char(16)'
+    elif sql_type == 'text':
+        red_type = 'varchar(max)'
+    elif sql_type == 'xml':
+        red_type = 'varchar(max)'
+    else:
+        # unsupported conversion
+        raise ValueError(f"MS SQL Data type {mssql_type} can't be converted to Redshift Data type.")
+
+    return(red_type)
+
+
+def redshift_to_spectrum_type_convert(redshift_type):
+    # because our data is in JSON format in S3, we need to convert DATE to TIMESTAMP, as spectrum doesn't support DATE datatypr in JSON
+    # https://docs.aws.amazon.com/redshift/latest/dg/r_CREATE_EXTERNAL_TABLE.html - (DATE data type can be used only with text, Parquet, or ORC data files, or as a partition column)
+    redshift_type = redshift_type.lower()
+
+    if redshift_type == "date":
+        spectrum_type = "timestamp"
+    else:
+        # all else, e.g., varchar binary
+        spectrum_type = redshift_type
+
+    return('{type}'.format(type=spectrum_type))
+
+
 class S3ToRedshiftOperator(BaseOperator):
     """
     S3 To Redshift Operator
@@ -43,10 +218,10 @@ class S3ToRedshiftOperator(BaseOperator):
                                     is defined in the operator itself. By
                                     default the location is set to 's3'.
     :type schema_location:          string
-    :param origin_datatype:         The incoming database type from which to		
-                                    convert the origin schema. Required when		
-                                    specifiying the origin_schema. Current		
-                                    possible values include "mysql".		
+    :param origin_datatype:         The incoming database type from which to
+                                    convert the origin schema. Required when
+                                    specifiying the origin_schema. Current
+                                    possible values include "mysql".
     :type origin_datatype:          string
     :param load_type:               The method of loading into Redshift that
                                     should occur. Options:
@@ -177,33 +352,32 @@ class S3ToRedshiftOperator(BaseOperator):
         pg_hook = PostgresHook(self.redshift_conn_id)
 
         schema = None
-        
+
         if self.origin_schema:
             schema = self.read_and_format()
             self.create_if_not_exists(schema, pg_hook)
             self.reconcile_schemas(schema, pg_hook)
-        
+
         self.copy_data(pg_hook, schema)
 
     def read_and_format(self):
         if self.schema_location.lower() == 's3':
                 hook = S3Hook(self.s3_conn_id)
                 schema = (hook.read_key(self.origin_schema,
-                                       bucket_name=
-                                       '{0}'.format(self.s3_bucket)))
+                          bucket_name='{0}'.format(self.s3_bucket)))
                 schema = json.loads(schema.replace("'", '"').lower())
         else:
             schema = self.origin_schema.lower()
-        if self.origin_datatype:		
-            if self.origin_datatype.lower() == 'mysql':		
-                for i in schema:		
-                    i['type'] = self.mysql_to_redshift_type_convert(i['type'])
-            elif self.origin_datatype.lower() == 'postgres':		
-                for i in schema:		
-                    i['type'] = self.postgres_to_redshift_type_convert(i['type'])
-            elif self.origin_datatype.lower() == 'mssql':		
-                for i in schema:		
-                    i['type'] = self.mssql_to_redshift_type_convert(i['type'])
+        if self.origin_datatype:
+            if self.origin_datatype.lower() == 'mysql':
+                for i in schema:
+                    i['type'] = mysql_to_redshift_type_convert(i['type'])
+            elif self.origin_datatype.lower() == 'postgres':
+                for i in schema:
+                    i['type'] = postgres_to_redshift_type_convert(i['type'])
+            elif self.origin_datatype.lower() == 'mssql':
+                for i in schema:
+                    i['type'] = mssql_to_redshift_type_convert(i['type'])
             elif self.origin_datatype is not None:
                 raise Exception('Unsupported origin data type')
         return schema
@@ -256,11 +430,9 @@ class S3ToRedshiftOperator(BaseOperator):
             aws_role_arn = s3_conn.extra_dejson.get('role_arn', None)
 
             if aws_key and aws_secret:
-                creds = ("aws_access_key_id={0};aws_secret_access_key={1}"
-                    .format(aws_key, aws_secret))
+                creds = ("aws_access_key_id={0};aws_secret_access_key={1}".format(aws_key, aws_secret))
             elif aws_role_arn:
-                creds = ("aws_iam_role={0}"
-                    .format(aws_role_arn))
+                creds = ("aws_iam_role={0}".format(aws_role_arn))
 
             return creds
 
@@ -383,7 +555,7 @@ class S3ToRedshiftOperator(BaseOperator):
             pg_hook.run(append_sql, autocommit=True)
             pg_hook.run(drop_temp_sql)
         elif self.load_type == 'replace_date_partition':
-            pg_hook.run(delete_partition_sql, parameters={"date":self.partition_value})
+            pg_hook.run(delete_partition_sql, parameters={"date": self.partition_value})
             pg_hook.run(load_sql)
 
     def create_if_not_exists(self, schema, pg_hook, temp=False):
@@ -449,160 +621,153 @@ class S3ToRedshiftOperator(BaseOperator):
 
         pg_hook.run([create_schema_query, create_table_query])
 
-    def mysql_to_redshift_type_convert(self, mysql_type):
-        mysql_type = mysql_type.lower()
-        try:
-            sql_type, extra = mysql_type.strip().split(" ", 1)
 
-            # This must be a tricky enum
-            if ')' in extra:
-                sql_type, extra = mysql_type.strip().split(")")
+class S3ToRedshiftSpectrumOperator(BaseOperator):
+    """
+    S3 To Redshift Operator
+    :param redshift_conn_id:        The destination redshift connection id.
+    :type redshift_conn_id:         string
+    :param external_db:             The destination redshift spectrum db.
+    :type external_db:              string
+    :param external_schema:         The destination redshift spectrum schema.
+    :type external_schema:          string
+    :param external_table:          The destination redshift spectrum table.
+    :type external_table:           string
+    :param s3_conn_id:              The source s3 connection id.
+    :type s3_conn_id:               string
+    :param s3_bucket:               The source s3 bucket.
+    :type s3_bucket:                string
+    :param s3_key:                  The source s3 key.
+    :type s3_key:                   string
+    :param origin_schema:           The s3 key for the incoming data schema.
+                                    Expects a JSON file with an array of
+                                    dictionaries specifying name and type.
+                                    (e.g. {"name": "_id", "type": "int4"})
+    :type origin_schema:            array of dictionaries
+    :param schema_location:         The location of the origin schema. This
+                                    can be set to 'S3' or 'Local'.
+                                    If 'S3', it will expect a valid S3 Key. If
+                                    'Local', it will expect a dictionary that
+                                    is defined in the operator itself. By
+                                    default the location is set to 's3'.
+    :type schema_location:          string
+    :param origin_datatype:         The incoming database type from which to
+                                    convert the origin schema. Required when
+                                    specifiying the origin_schema. Current
+                                    possible values include "mysql".
+    :type origin_datatype:          string
+    """
 
-        except ValueError:
-            sql_type = mysql_type.strip()
-            extra = ""
+    template_fields = ('s3_key',
+                       'origin_schema')
 
-        # check if extra contains unsigned
-        unsigned = "unsigned" in extra
-        # remove unsigned now
-        extra = re.sub("character set [\w\d]+\s*", "", extra.replace("unsigned", ""))
-        extra = re.sub("collate [\w\d]+\s*", "", extra.replace("unsigned", ""))
-        extra = extra.replace("auto_increment", "")
-        extra = extra.replace("serial", "")
-        extra = extra.replace("zerofill", "")
-        extra = extra.replace("unsigned", "")
+    @apply_defaults
+    def __init__(self,
+                 s3_conn_id,
+                 s3_bucket,
+                 s3_key,
+                 redshift_conn_id,
+                 external_db,
+                 external_schema,
+                 external_table,
+                 origin_schema,
+                 schema_location='s3',
+                 origin_datatype=None,
+                 *args,
+                 **kwargs):
+        super().__init__(*args, **kwargs)
+        self.s3_conn_id = s3_conn_id
+        self.s3_bucket = s3_bucket
+        self.s3_key = s3_key
+        self.redshift_conn_id = redshift_conn_id
+        self.external_db = external_db.lower()
+        self.external_schema = external_schema.lower()
+        self.external_table = external_table.lower()
+        self.origin_schema = origin_schema
+        self.schema_location = schema_location
+        self.origin_datatype = origin_datatype
 
-        if sql_type == "tinyint(1)":
-            red_type = "boolean"
-        elif sql_type.startswith("tinyint("):
-            red_type = "smallint"
-        elif sql_type.startswith("smallint("):
-            if unsigned:
-                red_type = "integer"
-            else:
-                red_type = "smallint"
-        elif sql_type.startswith("mediumint("):
-            red_type = "integer"
-        elif sql_type.startswith("int("):
-            if unsigned:
-                red_type = "bigint"
-            else:
-                red_type = "integer"
-        elif sql_type.startswith("bigint("):
-            if unsigned:
-                red_type = "varchar(80)"
-            else:
-                red_type = "bigint"
-        elif sql_type.startswith("float"):
-            red_type = "real"
-        elif sql_type.startswith("double"):
-            red_type = "double precision"
-        elif sql_type.startswith("decimal"):
-            # same decimal
-            red_type = sql_type
-        elif sql_type.startswith("char("):
-            size = int(sql_type.split("(")[1].rstrip(")"))
-            red_type = "varchar(%s)" % (size * 4)
-        elif sql_type.startswith("varchar("):
-            size = int(sql_type.split("(")[1].rstrip(")"))
-            red_type = "varchar(%s)" % (size * 4)
-        elif sql_type == "longtext":
-            red_type = "varchar(max)"
-        elif sql_type == "mediumtext":
-            red_type = "varchar(max)"
-        elif sql_type == "tinytext":
-            red_type = "text(%s)" % (255 * 4)
-        elif sql_type == "text":
-            red_type = "varchar(max)"
-        elif sql_type.startswith("enum(") or sql_type.startswith("set("):
-            red_type = "varchar(%s)" % (255 * 2)
-        elif sql_type == "blob":
-            red_type = "varchar(max)"
-        elif sql_type == "mediumblob":
-            red_type = "varchar(max)"
-        elif sql_type == "longblob":
-            red_type = "varchar(max)"
-        elif sql_type == "tinyblob":
-            red_type = "varchar(255)"
-        elif sql_type.startswith("binary"):
-            red_type = "varchar(255)"
-        elif sql_type == "date":
-            # same
-            red_type = sql_type
-        elif sql_type == "time":
-            red_type = "varchar(40)"
-        elif sql_type == "datetime":
-            red_type = "timestamp"
-        elif sql_type == "year":
-            red_type = "varchar(16)"
-        elif sql_type == "timestamp":
-            # same
-            red_type = sql_type
+        if self.schema_location.lower() not in ('s3', 'local'):
+            raise Exception('Valid Schema Locations are "s3" or "local".')
+
+    def execute(self, context):
+
+        pg_hook = PostgresHook(self.redshift_conn_id)
+
+        schema = None
+        schema = self.read_and_format()
+        self.create_if_not_exists(schema, pg_hook)
+
+    def read_and_format(self):
+        if self.schema_location.lower() == 's3':
+                hook = S3Hook(self.s3_conn_id)
+                schema = (hook.read_key(self.origin_schema,
+                          bucket_name='{0}'.format(self.s3_bucket)))
+                schema = json.loads(schema.replace("'", '"').lower())
         else:
-            # all else, e.g., varchar binary
-            red_type = "varchar(max)"
+            schema = self.origin_schema.lower()
+        if self.origin_datatype:
+            if self.origin_datatype.lower() == 'mysql':
+                for i in schema:
+                    i['type'] = redshift_to_spectrum_type_convert(mysql_to_redshift_type_convert(i['type']))
+            elif self.origin_datatype.lower() == 'postgres':
+                for i in schema:
+                    i['type'] = redshift_to_spectrum_type_convert(postgres_to_redshift_type_convert(i['type']))
+            elif self.origin_datatype.lower() == 'mssql':
+                for i in schema:
+                    i['type'] = redshift_to_spectrum_type_convert(mssql_to_redshift_type_convert(i['type']))
+            elif self.origin_datatype is not None:
+                raise Exception('Unsupported origin data type')
+        return schema
 
-        return('{type} {extra_def}'.format(type=red_type, extra_def=extra))
+    def create_if_not_exists(self, schema, pg_hook):
+        @provide_session
+        def get_conn(conn_id, session=None):
+            conn = (
+                session.query(Connection)
+                .filter(Connection.conn_id == conn_id)
+                .first())
+            return conn
 
-    def postgres_to_redshift_type_convert(self, postgres_type):
-        postgres_type = postgres_type.lower()
-        
-        if postgres_type == "jsonb":
-            red_type = "varchar(max)"
-        elif postgres_type == "text":
-            red_type = "varchar(max)"
-        elif postgres_type == "geometry":
-            red_type = "varchar(max)"
-        else:
-            # all else, e.g., varchar binary
-            red_type = postgres_type
+        s3_conn = get_conn(self.s3_conn_id)
+        aws_role_arn = s3_conn.extra_dejson.get('role_arn', None)
 
-        return('{type}'.format(type=red_type))
+        if not aws_role_arn:
+            raise Exception('Please provide role_arn in s3 connection settings.')
 
-    def mssql_to_redshift_type_convert(self, mssql_type):
-        mssql_type = mssql_type.lower()
-        sql_type = mssql_type.split("(")[0]
-        
-        no_change_types = [
-            'bigint', 
-            'char',
-            'date',
-            'decimal',
-            'double precision',
-            'int',
-            'integer',
-            'numeric',
-            'real',
-            'smallint',
-            'varchar',
-            'nvarchar',
-            'nchar'
-        ]
+        output = ''
+        for item in schema:
+            k = "{quote}{key}{quote}".format(quote='"', key=item['name'])
+            field = ' '.join([k, item['type']])
+            output += field
+            output += ', '
+        # Remove last comma and space after schema items loop ends
+        output = output[:-2]
 
-        if sql_type in no_change_types:
-            red_type = mssql_type
-        elif sql_type == 'bit':
-            red_type = 'boolean'
-        elif sql_type in ['datetime','datetime2','smalldatetime']:
-            red_type = 'timestamp'
-        elif sql_type == 'datetimeoffset':
-            red_type = 'timestamptz'
-        elif sql_type == 'float':
-            red_type = sql_type
-        elif sql_type == 'money':
-            red_type = 'decimal(15,4)'
-        elif sql_type == 'smallmoney':
-            red_type = 'decimal(6,4)'
-        elif sql_type == 'tinyint':
-            red_type = 'smallint'
-        elif sql_type == 'uniqueidentifier':
-            red_type = 'char(16)'
-        elif sql_type == 'text':
-            red_type = 'varchar(max)'
-        elif sql_type == 'xml':
-            red_type = 'varchar(max)'
-        else:
-            # unsupported conversion
-            raise ValueError(f"MS SQL Data type {mssql_type} can't be converted to Redshift Data type.")
+        create_schema_query = \
+            """
+            CREATE EXTERNAL SCHEMA IF NOT EXISTS {0}
+            FROM DATA CATALOG
+            DATABASE '{1}'
+            IAM_ROLE '{2}'
+            CREATE EXTERNAL DATABASE IF NOT EXISTS;
+            """.format(self.external_schema, self.external_db, aws_role_arn)
 
-        return(red_type)
+        drop_table_query = \
+            """
+            DROP TABLE IF EXISTS {0}.{1};
+            """.format(self.external_schema, self.external_table)
+
+        create_table_query = \
+            '''
+            CREATE EXTERNAL TABLE "{schema}"."{table}"
+            ({fields})
+            ROW FORMAT SERDE 'org.openx.data.jsonserde.JsonSerDe'
+            location 's3://{bucket}/{key}';
+            '''.format(schema=self.external_schema,
+                       table=self.external_table,
+                       fields=output,
+                       bucket=self.s3_bucket,
+                       key=self.s3_key)
+
+        pg_hook.run([create_schema_query, drop_table_query, create_table_query], autocommit=True)
