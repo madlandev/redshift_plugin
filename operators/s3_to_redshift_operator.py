@@ -178,13 +178,11 @@ def redshift_to_spectrum_type_convert(redshift_type):
     # because our data is in JSON format in S3, we need to convert DATE to TIMESTAMP, as spectrum doesn't support DATE datatypr in JSON
     # https://docs.aws.amazon.com/redshift/latest/dg/r_CREATE_EXTERNAL_TABLE.html - (DATE data type can be used only with text, Parquet, or ORC data files, or as a partition column)
     redshift_type = redshift_type.lower()
-
-    if redshift_type == "date":
+    if redshift_type.strip() == "date":
         spectrum_type = "timestamp"
     else:
         # all else, e.g., varchar binary
         spectrum_type = redshift_type
-
     return('{type}'.format(type=spectrum_type))
 
 
