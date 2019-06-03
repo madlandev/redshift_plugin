@@ -106,7 +106,7 @@ def mysql_to_redshift_type_convert(mysql_type):
             # all else, e.g., varchar binary
             red_type = "varchar(max)"
 
-        return('{type} {extra_def}'.format(type=red_type, extra_def=extra))
+        return('{type}{extra_def}'.format(type=red_type, extra_def=(' '+extra).rstrip()))
 
 
 def postgres_to_redshift_type_convert(postgres_type):
@@ -178,7 +178,7 @@ def redshift_to_spectrum_type_convert(redshift_type):
     # because our data is in JSON format in S3, we need to convert DATE to TIMESTAMP, as spectrum doesn't support DATE datatypr in JSON
     # https://docs.aws.amazon.com/redshift/latest/dg/r_CREATE_EXTERNAL_TABLE.html - (DATE data type can be used only with text, Parquet, or ORC data files, or as a partition column)
     redshift_type = redshift_type.lower()
-    if redshift_type.strip() == "date":
+    if redshift_type == "date":
         spectrum_type = "timestamp"
     else:
         # all else, e.g., varchar binary
