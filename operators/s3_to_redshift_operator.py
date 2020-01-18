@@ -14,99 +14,99 @@ from airflow.hooks.postgres_hook import PostgresHook
 
 
 def mysql_to_redshift_type_convert(mysql_type):
-        mysql_type = mysql_type.lower()
-        try:
-            sql_type, extra = mysql_type.strip().split(" ", 1)
+    mysql_type = mysql_type.lower()
+    try:
+        sql_type, extra = mysql_type.strip().split(" ", 1)
 
-            # This must be a tricky enum
-            if ')' in extra:
-                sql_type, extra = mysql_type.strip().split(")")
+        # This must be a tricky enum
+        if ')' in extra:
+            sql_type, extra = mysql_type.strip().split(")")
 
-        except ValueError:
-            sql_type = mysql_type.strip()
-            extra = ""
+    except ValueError:
+        sql_type = mysql_type.strip()
+        extra = ""
 
-        # check if extra contains unsigned
-        unsigned = "unsigned" in extra
-        # remove unsigned now
-        extra = re.sub("character set [\w\d]+\s*", "", extra.replace("unsigned", ""))
-        extra = re.sub("collate [\w\d]+\s*", "", extra.replace("unsigned", ""))
-        extra = extra.replace("auto_increment", "")
-        extra = extra.replace("serial", "")
-        extra = extra.replace("zerofill", "")
-        extra = extra.replace("unsigned", "")
+    # check if extra contains unsigned
+    unsigned = "unsigned" in extra
+    # remove unsigned now
+    extra = re.sub("character set [\w\d]+\s*", "", extra.replace("unsigned", ""))
+    extra = re.sub("collate [\w\d]+\s*", "", extra.replace("unsigned", ""))
+    extra = extra.replace("auto_increment", "")
+    extra = extra.replace("serial", "")
+    extra = extra.replace("zerofill", "")
+    extra = extra.replace("unsigned", "")
 
-        if sql_type == "tinyint(1)":
-            red_type = "boolean"
-        elif sql_type.startswith("tinyint("):
-            red_type = "smallint"
-        elif sql_type.startswith("smallint("):
-            if unsigned:
-                red_type = "integer"
-            else:
-                red_type = "smallint"
-        elif sql_type.startswith("mediumint("):
+    if sql_type == "tinyint(1)":
+        red_type = "boolean"
+    elif sql_type.startswith("tinyint("):
+        red_type = "smallint"
+    elif sql_type.startswith("smallint("):
+        if unsigned:
             red_type = "integer"
-        elif sql_type.startswith("int("):
-            if unsigned:
-                red_type = "bigint"
-            else:
-                red_type = "integer"
-        elif sql_type.startswith("bigint("):
-            if unsigned:
-                red_type = "varchar(80)"
-            else:
-                red_type = "bigint"
-        elif sql_type.startswith("float"):
-            red_type = "real"
-        elif sql_type.startswith("double"):
-            red_type = "double precision"
-        elif sql_type.startswith("decimal"):
-            # same decimal
-            red_type = sql_type
-        elif sql_type.startswith("char("):
-            size = int(sql_type.split("(")[1].rstrip(")"))
-            red_type = "varchar(%s)" % (size * 4)
-        elif sql_type.startswith("varchar("):
-            size = int(sql_type.split("(")[1].rstrip(")"))
-            red_type = "varchar(%s)" % (size * 4)
-        elif sql_type == "longtext":
-            red_type = "varchar(max)"
-        elif sql_type == "mediumtext":
-            red_type = "varchar(max)"
-        elif sql_type == "tinytext":
-            red_type = "text(%s)" % (255 * 4)
-        elif sql_type == "text":
-            red_type = "varchar(max)"
-        elif sql_type.startswith("enum(") or sql_type.startswith("set("):
-            red_type = "varchar(%s)" % (255 * 2)
-        elif sql_type == "blob":
-            red_type = "varchar(max)"
-        elif sql_type == "mediumblob":
-            red_type = "varchar(max)"
-        elif sql_type == "longblob":
-            red_type = "varchar(max)"
-        elif sql_type == "tinyblob":
-            red_type = "varchar(255)"
-        elif sql_type.startswith("binary"):
-            red_type = "varchar(255)"
-        elif sql_type == "date":
-            # same
-            red_type = sql_type
-        elif sql_type == "time":
-            red_type = "varchar(40)"
-        elif sql_type == "datetime":
-            red_type = "timestamp"
-        elif sql_type == "year":
-            red_type = "varchar(16)"
-        elif sql_type == "timestamp":
-            # same
-            red_type = sql_type
         else:
-            # all else, e.g., varchar binary
-            red_type = "varchar(max)"
+            red_type = "smallint"
+    elif sql_type.startswith("mediumint("):
+        red_type = "integer"
+    elif sql_type.startswith("int("):
+        if unsigned:
+            red_type = "bigint"
+        else:
+            red_type = "integer"
+    elif sql_type.startswith("bigint("):
+        if unsigned:
+            red_type = "varchar(80)"
+        else:
+            red_type = "bigint"
+    elif sql_type.startswith("float"):
+        red_type = "real"
+    elif sql_type.startswith("double"):
+        red_type = "double precision"
+    elif sql_type.startswith("decimal"):
+        # same decimal
+        red_type = sql_type
+    elif sql_type.startswith("char("):
+        size = int(sql_type.split("(")[1].rstrip(")"))
+        red_type = "varchar(%s)" % (size * 4)
+    elif sql_type.startswith("varchar("):
+        size = int(sql_type.split("(")[1].rstrip(")"))
+        red_type = "varchar(%s)" % (size * 4)
+    elif sql_type == "longtext":
+        red_type = "varchar(max)"
+    elif sql_type == "mediumtext":
+        red_type = "varchar(max)"
+    elif sql_type == "tinytext":
+        red_type = "text(%s)" % (255 * 4)
+    elif sql_type == "text":
+        red_type = "varchar(max)"
+    elif sql_type.startswith("enum(") or sql_type.startswith("set("):
+        red_type = "varchar(%s)" % (255 * 2)
+    elif sql_type == "blob":
+        red_type = "varchar(max)"
+    elif sql_type == "mediumblob":
+        red_type = "varchar(max)"
+    elif sql_type == "longblob":
+        red_type = "varchar(max)"
+    elif sql_type == "tinyblob":
+        red_type = "varchar(255)"
+    elif sql_type.startswith("binary"):
+        red_type = "varchar(255)"
+    elif sql_type == "date":
+        # same
+        red_type = sql_type
+    elif sql_type == "time":
+        red_type = "varchar(40)"
+    elif sql_type == "datetime":
+        red_type = "timestamp"
+    elif sql_type == "year":
+        red_type = "varchar(16)"
+    elif sql_type == "timestamp":
+        # same
+        red_type = sql_type
+    else:
+        # all else, e.g., varchar binary
+        red_type = "varchar(max)"
 
-        return('{type}{extra_def}'.format(type=red_type, extra_def=(' '+extra).rstrip()))
+    return('{type}{extra_def}'.format(type=red_type, extra_def=(' '+extra).rstrip()))
 
 
 def postgres_to_redshift_type_convert(postgres_type):
@@ -360,10 +360,10 @@ class S3ToRedshiftOperator(BaseOperator):
 
     def read_and_format(self):
         if self.schema_location.lower() == 's3':
-                hook = S3Hook(self.s3_conn_id)
-                schema = (hook.read_key(self.origin_schema,
-                          bucket_name='{0}'.format(self.s3_bucket)))
-                schema = json.loads(schema.replace("'", '"').lower())
+            hook = S3Hook(self.s3_conn_id)
+            schema = (hook.read_key(self.origin_schema,
+                      bucket_name='{0}'.format(self.s3_bucket)))
+            schema = json.loads(schema.replace("'", '"').lower())
         else:
             schema = self.origin_schema.lower()
         if self.origin_datatype:
@@ -541,7 +541,7 @@ class S3ToRedshiftOperator(BaseOperator):
             pg_hook.run(truncate_sql)
             pg_hook.run(load_sql)
         elif self.load_type == 'upsert':
-            self.create_if_not_exists(schema, pg_hook, temp=True)
+            self.create_tmp_table(schema, pg_hook)
             load_temp_sql = \
                 '''COPY "{0}"."{1}{2}" {3}'''.format(self.redshift_schema,
                                                      self.table,
@@ -555,6 +555,20 @@ class S3ToRedshiftOperator(BaseOperator):
         elif self.load_type == 'replace_date_partition':
             pg_hook.run(delete_partition_sql, parameters={"date": self.partition_value})
             pg_hook.run(load_sql)
+
+    def create_tmp_table(self, schema, pg_hook):
+        tmp_table = '{0}{1}'.format(self.table, self.temp_suffix)
+        original_table = self.table
+
+        create_table_query = \
+            '''
+            CREATE TABLE "{schema}"."{tmp_table}"
+            (LIKE "{schema}"."{original_table}")
+            '''.format(schema=self.redshift_schema,
+                       tmp_table=tmp_table,
+                       original_table=original_table)
+
+        pg_hook.run([create_table_query])
 
     def create_if_not_exists(self, schema, pg_hook, temp=False):
         output = ''
@@ -698,10 +712,10 @@ class S3ToRedshiftSpectrumOperator(BaseOperator):
 
     def read_and_format(self):
         if self.schema_location.lower() == 's3':
-                hook = S3Hook(self.s3_conn_id)
-                schema = (hook.read_key(self.origin_schema,
-                          bucket_name='{0}'.format(self.s3_bucket)))
-                schema = json.loads(schema.replace("'", '"').lower())
+            hook = S3Hook(self.s3_conn_id)
+            schema = (hook.read_key(self.origin_schema,
+                      bucket_name='{0}'.format(self.s3_bucket)))
+            schema = json.loads(schema.replace("'", '"').lower())
         else:
             schema = self.origin_schema.lower()
         if self.origin_datatype:
