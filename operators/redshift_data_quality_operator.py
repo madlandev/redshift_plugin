@@ -63,4 +63,4 @@ class RedshiftDataQualityOperator(BaseOperator):
         if not results:
             self.log.info(f'The data quality test of {self.check_type} on column {self.schema_name}.{self.table_name}.{self.column_name} was completed successfully.')
         else:
-            raise AirflowException(f'The data quality test of {self.check_type} on column {self.schema_name}.{self.table_name}.{self.column_name} was failed.\nQuery:{query}\nResults:{results}')
+            raise AirflowException(f'The data quality test of {self.check_type} on column {self.schema_name}.{self.table_name}.{self.column_name} has failed.\nQuery:{query}\nResults:{results}')
