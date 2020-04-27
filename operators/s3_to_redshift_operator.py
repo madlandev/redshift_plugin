@@ -3,6 +3,7 @@ import random
 import string
 import logging
 import re
+import time
 
 from airflow.utils.db import provide_session
 from airflow.models import Connection
@@ -351,12 +352,15 @@ class S3ToRedshiftOperator(BaseOperator):
 
         schema = None
 
+        origin_schema_sql = []
+
         if self.origin_schema:
             schema = self.read_and_format()
-            self.create_if_not_exists(schema, pg_hook)
-            self.reconcile_schemas(schema, pg_hook)
+            create_if_not_exists_sql = self.create_if_not_exists(schema)
+            reconcile_schemas_sql = self.reconcile_schemas(schema, pg_hook)
+            origin_schema_sql = create_if_not_exists_sql + reconcile_schemas_sql
 
-        self.copy_data(pg_hook, schema)
+        self.copy_data(pg_hook, origin_schema_sql, schema)
 
     def read_and_format(self):
         if self.schema_location.lower() == 's3':
@@ -392,6 +396,7 @@ class S3ToRedshiftOperator(BaseOperator):
         incoming_keys = [column['name'] for column in schema]
         diff = list(set(incoming_keys) - set(pg_schema.keys()))
         print(diff)
+        alter_sql_list = []
         # Check length of column differential to see if any new columns exist
         if len(diff):
             for i in diff:
@@ -405,12 +410,13 @@ class S3ToRedshiftOperator(BaseOperator):
                                     self.table,
                                     e['name'],
                                     e['type'])
-                        pg_hook.run(alter_query)
-                        logging.info('The new columns were:' + str(diff))
+                        alter_sql_list.append(alter_query)
+            logging.info('The new columns were:' + str(diff))
         else:
             logging.info('There were no new columns.')
+        return alter_sql_list
 
-    def copy_data(self, pg_hook, schema=None):
+    def copy_data(self, pg_hook, origin_schema_sql, schema=None,):
         @provide_session
         def get_conn(conn_id, session=None):
             conn = (
@@ -531,32 +537,44 @@ class S3ToRedshiftOperator(BaseOperator):
         load_sql = '''COPY "{0}"."{1}" {2}'''.format(self.redshift_schema,
                                                      self.table,
                                                      base_sql)
+
+        queries_to_run = origin_schema_sql
         if self.load_type == 'append':
-            pg_hook.run(load_sql)
+            queries_to_run.append(load_sql)
+            pg_hook.run(queries_to_run)
         elif self.load_type == 'rebuild':
-            pg_hook.run(drop_sql)
-            self.create_if_not_exists(schema, pg_hook)
-            pg_hook.run(load_sql)
+            queries_to_run.append(drop_sql)
+            queries_to_run = queries_to_run + self.create_if_not_exists(schema)
+            queries_to_run.append(load_sql)
+            pg_hook.run(queries_to_run)
         elif self.load_type == 'truncate':
-            pg_hook.run(truncate_sql)
-            pg_hook.run(load_sql)
+            queries_to_run.append(truncate_sql)
+            queries_to_run.append(load_sql)
+            pg_hook.run(queries_to_run)
         elif self.load_type == 'upsert':
-            self.create_tmp_table(schema, pg_hook)
+            create_tmp_table_sql = self.create_tmp_table(schema)
             load_temp_sql = \
                 '''COPY "{0}"."{1}{2}" {3}'''.format(self.redshift_schema,
                                                      self.table,
                                                      self.temp_suffix,
                                                      base_sql)
-            pg_hook.run(load_temp_sql)
-            pg_hook.run(delete_sql)
-            pg_hook.run(delete_confirm_sql)
+            queries_to_run.append(create_tmp_table_sql)
+            queries_to_run.append(load_temp_sql)
+            queries_to_run.append(delete_sql)
+            queries_to_run.append(delete_confirm_sql)
+            pg_hook.run(queries_to_run)
+            logging.info('Sleeping 10 second till preparing sql are finished')
+            time.sleep(10)
             pg_hook.run(append_sql, autocommit=True)
+            logging.info('Sleeping 10 second till append sql is finished')
+            time.sleep(10)
             pg_hook.run(drop_temp_sql)
         elif self.load_type == 'replace_date_partition':
-            pg_hook.run(delete_partition_sql, parameters={"date": self.partition_value})
-            pg_hook.run(load_sql)
+            queries_to_run.append(delete_partition_sql)
+            queries_to_run.append(load_sql)
+            pg_hook.run(queries_to_run, parameters={"date": self.partition_value})
 
-    def create_tmp_table(self, schema, pg_hook):
+    def create_tmp_table(self, schema):
         tmp_table = '{0}{1}'.format(self.table, self.temp_suffix)
         original_table = self.table
 
@@ -568,9 +586,9 @@ class S3ToRedshiftOperator(BaseOperator):
                        tmp_table=tmp_table,
                        original_table=original_table)
 
-        pg_hook.run([create_table_query])
+        return create_table_query
 
-    def create_if_not_exists(self, schema, pg_hook, temp=False):
+    def create_if_not_exists(self, schema):
         output = ''
         for item in schema:
             k = "{quote}{key}{quote}".format(quote='"', key=item['name'])
@@ -581,10 +599,7 @@ class S3ToRedshiftOperator(BaseOperator):
             output += ', '
         # Remove last comma and space after schema items loop ends
         output = output[:-2]
-        if temp:
-            copy_table = '{0}{1}'.format(self.table, self.temp_suffix)
-        else:
-            copy_table = self.table
+        copy_table = self.table
         create_schema_query = \
             '''
             CREATE SCHEMA IF NOT EXISTS "{0}";
@@ -631,7 +646,7 @@ class S3ToRedshiftOperator(BaseOperator):
                        distkey=dk,
                        sortkey=sk)
 
-        pg_hook.run([create_schema_query, create_table_query])
+        return [create_schema_query, create_table_query]
 
 
 class S3ToRedshiftSpectrumOperator(BaseOperator):
