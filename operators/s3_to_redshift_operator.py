@@ -3,6 +3,7 @@ import random
 import string
 import logging
 import re
+import time
 
 from airflow.utils.db import provide_session
 from airflow.models import Connection
@@ -782,4 +783,7 @@ class S3ToRedshiftSpectrumOperator(BaseOperator):
                        bucket=self.s3_bucket,
                        key=self.s3_key)
 
-        pg_hook.run([create_schema_query, drop_table_query, create_table_query], autocommit=True)
+        pg_hook.run([create_schema_query, drop_table_query], autocommit=True)
+        logging.info('Sleeping 10 second till external table dropped')
+        time.sleep(10)
+        pg_hook.run(create_table_query, autocommit=True)
