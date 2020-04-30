@@ -798,6 +798,6 @@ class S3ToRedshiftSpectrumOperator(BaseOperator):
                        key=self.s3_key)
 
         pg_hook.run([create_schema_query, drop_table_query], autocommit=True)
-        logging.info('Sleeping 10 second till external table dropped')
-        time.sleep(10)
+        logging.info('Sleeping 60 second till external table dropped')
+        time.sleep(60)
         pg_hook.run(create_table_query, autocommit=True)
