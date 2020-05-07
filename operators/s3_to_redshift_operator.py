@@ -398,7 +398,8 @@ class S3ToRedshiftOperator(BaseOperator):
         print(diff)
         alter_sql_list = []
         # Check length of column differential to see if any new columns exist
-        if len(diff):
+        # And also bool(pg_schema) check case when table not exists at all
+        if len(diff) and bool(pg_schema):
             for i in diff:
                 for e in schema:
                     if i == e['name']:
