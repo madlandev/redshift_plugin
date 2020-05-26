@@ -277,7 +277,8 @@ class S3ToRedshiftOperator(BaseOperator):
 
     template_fields = ('s3_key',
                        'origin_schema',
-                       'partition_value')
+                       'partition_value',
+                       'copy_params')
 
     @apply_defaults
     def __init__(self,
