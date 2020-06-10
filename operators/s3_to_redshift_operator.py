@@ -119,6 +119,8 @@ def postgres_to_redshift_type_convert(postgres_type):
         red_type = "varchar(max)"
     elif postgres_type == "geometry":
         red_type = "varchar(max)"
+    elif postgres_type == "bytea":
+        red_type = "varchar(max)"
     else:
         # all else, e.g., varchar binary
         red_type = postgres_type
@@ -163,7 +165,7 @@ def mssql_to_redshift_type_convert(mssql_type):
     elif sql_type == 'tinyint':
         red_type = 'smallint'
     elif sql_type == 'uniqueidentifier':
-        red_type = 'char(16)'
+        red_type = 'char(16)'      
     elif sql_type == 'text':
         red_type = 'varchar(max)'
     elif sql_type == 'xml':
