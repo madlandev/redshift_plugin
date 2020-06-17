@@ -760,7 +760,7 @@ class S3ToRedshiftSpectrumOperator(BaseOperator):
                 .first())
             return conn
 
-        s3_conn = get_conn(self.s3_conn_id)
+        s3_conn = get_conn(self.redshift_conn_id)
         aws_role_arn = s3_conn.extra_dejson.get('role_arn', None)
 
         if not aws_role_arn:
