@@ -687,6 +687,10 @@ class S3ToRedshiftSpectrumOperator(BaseOperator):
                                     specifiying the origin_schema. Current
                                     possible values include "mysql".
     :type origin_datatype:          string
+    :param external_table_schema:   The external table schema.
+                                    Required when nested data is used in
+                                    external table.
+    :type external_table_schema:    string
     """
 
     template_fields = ('s3_key',
@@ -704,6 +708,7 @@ class S3ToRedshiftSpectrumOperator(BaseOperator):
                  origin_schema,
                  schema_location='s3',
                  origin_datatype=None,
+                 external_table_schema=None,
                  *args,
                  **kwargs):
         super().__init__(*args, **kwargs)
@@ -717,6 +722,7 @@ class S3ToRedshiftSpectrumOperator(BaseOperator):
         self.origin_schema = origin_schema
         self.schema_location = schema_location
         self.origin_datatype = origin_datatype
+        self.external_table_schema = external_table_schema
 
         if self.schema_location.lower() not in ('s3', 'local'):
             raise Exception('Valid Schema Locations are "s3" or "local".')
@@ -766,8 +772,14 @@ class S3ToRedshiftSpectrumOperator(BaseOperator):
         if not aws_role_arn:
             raise Exception('Please provide role_arn in s3 connection settings.')
 
+        items = schema
+
+        # if external_table_schema param was provided - use it 
+        if self.external_table_schema:
+            items = self.external_table_schema
+
         output = ''
-        for item in schema:
+        for item in items:
             k = "{quote}{key}{quote}".format(quote='"', key=item['name'])
             field = ' '.join([k, item['type']])
             output += field
